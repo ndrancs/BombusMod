@@ -1,0 +1,74 @@
+name: Build Debug APK
+
+on:
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: 'Branch to checkout'
+        required: true
+        default: 'stage'
+        type: string
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v6
+      with:
+        ref: ${{ github.event.inputs.branch }}
+
+    - name: Set up JDK
+      uses: actions/setup-java@v5
+      with:
+        distribution: 'temurin'
+        java-version: '18'
+        cache: 'gradle'
+
+    - name: Setup Android SDK
+      uses: android-actions/setup-android@v4
+
+    - name: Build Debug APK
+      run: ./gradlew assembleDebug
+
+    - name: Find Debug APK
+      id: find-apk
+      run: |
+        APK_PATH=$(find . -name "*.apk" -path "*/debug/*" -type f | head -n1)
+        if [ -z "$APK_PATH" ]; then
+          echo "Error: Debug APK not found"
+          exit 1
+        fi
+        echo "apk_path=$APK_PATH" >> $GITHUB_OUTPUT
+        echo "apk_name=$(basename $APK_PATH)" >> $GITHUB_OUTPUT
+        echo "Found APK: $APK_PATH"
+
+    - name: Create Release
+      id: create-release
+      uses: actions/create-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: debug-${{ github.event.inputs.branch }}-${{ github.run_number }}
+        release_name: Debug APK - ${{ github.event.inputs.branch }} - ${{ github.run_number }}
+        body: |
+          Debug APK build from branch: `${{ github.event.inputs.branch }}`
+          Build number: ${{ github.run_number }}
+          Commit: ${{ github.sha }}
+        draft: false
+        prerelease: true
+
+    - name: Upload Debug APK to Release
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ steps.create-release.outputs.upload_url }}
+        asset_path: ${{ steps.find-apk.outputs.apk_path }}
+        asset_name: ${{ steps.find-apk.outputs.apk_name }}
+        asset_content_type: application/vnd.android.package-archive
